@@ -2,9 +2,12 @@ import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import { existsSync } from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
 const execFileAsync = promisify(execFile);
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CLAUDE_BIN = path.resolve(__dirname, "..", "node_modules", ".bin", "claude");
 const MODEL = process.env.ANTHROPIC_MODEL || "qwen2.5-coder:14b";
 
 /**
@@ -124,7 +127,7 @@ async function runClaudeCode(cwd, prompt) {
     let stdout = "";
     let stderr = "";
 
-    const proc = spawn("claude", args, {
+    const proc = spawn(CLAUDE_BIN, args, {
       cwd,
       timeout: 600_000, // 10 min timeout
       env: {
