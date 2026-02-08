@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { mkdirSync } from "fs";
 import { createServer } from "./server.js";
-import { initDb, upsertIssue, shouldAttempt, incrementAttempts, markStatus } from "./db.js";
+import { initDb, upsertIssue, shouldAttempt, incrementAttempts, markStatus, seedProjectsFromConfig, getAllProjects } from "./db.js";
 import { fixIssue } from "./fixer.js";
 import { createPullRequest, ensureLabel } from "./github.js";
 
@@ -27,6 +27,14 @@ const MAX_ATTEMPTS = parseInt(process.env.MAX_ATTEMPTS_PER_ISSUE || "2", 10);
 // --- Init ---
 mkdirSync(REPOS_DIR, { recursive: true });
 initDb(DB_PATH);
+
+// Seed projects from config.json into DB (idempotent - only inserts new ones)
+if (config.projects && Object.keys(config.projects).length > 0) {
+  const seeded = seedProjectsFromConfig(config.projects);
+  if (seeded > 0) {
+    console.log(`[sentry-autofix] Seeded ${seeded} project(s) from config.json into database`);
+  }
+}
 
 // Simple concurrency limiter
 let activeJobs = 0;
@@ -95,11 +103,12 @@ async function handleIssue(parsed, projectConfig) {
 }
 
 // --- Start Server ---
-const app = createServer({ config, secret: SECRET, onIssue: handleIssue });
+const app = createServer({ secret: SECRET, onIssue: handleIssue });
 
 app.listen(PORT, () => {
   console.log(`[sentry-autofix] Listening on port ${PORT}`);
-  console.log(`[sentry-autofix] Mapped projects: ${Object.keys(config.projects).join(", ")}`);
+  const projectSlugs = Object.keys(getAllProjects());
+  console.log(`[sentry-autofix] Mapped projects (${projectSlugs.length}): ${projectSlugs.join(", ") || "none"}`);
   console.log(`[sentry-autofix] Repos dir: ${REPOS_DIR}`);
   console.log(`[sentry-autofix] Max concurrent fixes: ${MAX_CONCURRENT}`);
   console.log(`[sentry-autofix] Max attempts per issue: ${MAX_ATTEMPTS}`);

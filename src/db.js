@@ -26,6 +26,18 @@ export function initDb(dbPath) {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      sentry_project_slug TEXT PRIMARY KEY,
+      repo TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      language TEXT NOT NULL,
+      framework TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   return db;
 }
 
@@ -74,4 +86,59 @@ export function shouldAttempt(sentryIssueId, maxAttempts) {
   if (!issue) return true;
   if (issue.status === "fixed" || issue.status === "pr_open") return false;
   return issue.attempts < maxAttempts;
+}
+
+// --- Project CRUD ---
+
+export function getAllProjects() {
+  const rows = db.prepare("SELECT * FROM projects ORDER BY sentry_project_slug").all();
+  const result = {};
+  for (const row of rows) {
+    result[row.sentry_project_slug] = {
+      repo: row.repo,
+      branch: row.branch,
+      language: row.language,
+      framework: row.framework,
+    };
+  }
+  return result;
+}
+
+export function getProject(slug) {
+  const row = db.prepare("SELECT * FROM projects WHERE sentry_project_slug = ?").get(slug);
+  if (!row) return null;
+  return { repo: row.repo, branch: row.branch, language: row.language, framework: row.framework };
+}
+
+export function createProject({ slug, repo, branch, language, framework }) {
+  db.prepare(`
+    INSERT INTO projects (sentry_project_slug, repo, branch, language, framework)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(slug, repo, branch, language, framework);
+  return getProject(slug);
+}
+
+export function updateProject(slug, { repo, branch, language, framework }) {
+  db.prepare(`
+    UPDATE projects SET repo = ?, branch = ?, language = ?, framework = ?, updated_at = datetime('now')
+    WHERE sentry_project_slug = ?
+  `).run(repo, branch, language, framework, slug);
+  return getProject(slug);
+}
+
+export function deleteProject(slug) {
+  db.prepare("DELETE FROM projects WHERE sentry_project_slug = ?").run(slug);
+}
+
+export function seedProjectsFromConfig(configProjects) {
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO projects (sentry_project_slug, repo, branch, language, framework)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  let seeded = 0;
+  for (const [slug, proj] of Object.entries(configProjects)) {
+    const result = insert.run(slug, proj.repo, proj.branch, proj.language, proj.framework);
+    if (result.changes > 0) seeded++;
+  }
+  return seeded;
 }

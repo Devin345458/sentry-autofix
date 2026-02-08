@@ -1,9 +1,9 @@
 import express from "express";
 import { verifySentrySignature } from "./verify.js";
 import { parseEventAlert, parseIssueEvent } from "./parser.js";
-import { getAllIssues, getStats } from "./db.js";
+import { getAllIssues, getStats, getAllProjects, getProject, createProject, updateProject, deleteProject } from "./db.js";
 
-export function createServer({ config, secret, onIssue }) {
+export function createServer({ secret, onIssue }) {
   const app = express();
 
   // Sentry sends JSON; we need the raw body for signature verification
@@ -27,10 +27,50 @@ export function createServer({ config, secret, onIssue }) {
     res.json({ stats, issues, uptime: process.uptime(), timestamp: new Date().toISOString() });
   });
 
+  // --- Project CRUD API ---
+  app.get("/api/projects", (_req, res) => {
+    res.json({ projects: getAllProjects() });
+  });
+
+  app.post("/api/projects", (req, res) => {
+    const { sentryProjectSlug, repo, branch, language, framework } = req.body;
+    if (!sentryProjectSlug || !repo || !branch || !language || !framework) {
+      return res.status(400).json({ error: "All fields are required: sentryProjectSlug, repo, branch, language, framework" });
+    }
+    if (getProject(sentryProjectSlug)) {
+      return res.status(409).json({ error: `Project "${sentryProjectSlug}" already exists` });
+    }
+    const project = createProject({ slug: sentryProjectSlug, repo, branch, language, framework });
+    res.status(201).json(project);
+  });
+
+  app.put("/api/projects/:slug", (req, res) => {
+    const { slug } = req.params;
+    if (!getProject(slug)) {
+      return res.status(404).json({ error: `Project "${slug}" not found` });
+    }
+    const { repo, branch, language, framework } = req.body;
+    if (!repo || !branch || !language || !framework) {
+      return res.status(400).json({ error: "All fields are required: repo, branch, language, framework" });
+    }
+    const project = updateProject(slug, { repo, branch, language, framework });
+    res.json(project);
+  });
+
+  app.delete("/api/projects/:slug", (req, res) => {
+    const { slug } = req.params;
+    if (!getProject(slug)) {
+      return res.status(404).json({ error: `Project "${slug}" not found` });
+    }
+    deleteProject(slug);
+    res.json({ ok: true });
+  });
+
   // Status page
   app.get("/", (_req, res) => {
     const stats = getStats();
     const issues = getAllIssues(50);
+    const projects = getAllProjects();
     const uptime = formatUptime(process.uptime());
     const statusMap = { pending: "#6b7280", in_progress: "#f59e0b", pr_open: "#10b981", fixed: "#10b981", failed: "#ef4444", error: "#ef4444" };
 
@@ -48,6 +88,27 @@ export function createServer({ config, secret, onIssue }) {
           <td>${esc(issue.repo)}</td>
           <td>${issue.attempts}</td>
           <td>${prLink}</td>
+        </tr>`;
+      }
+    }
+
+    let projectRows = "";
+    const projectSlugs = Object.keys(projects);
+    if (projectSlugs.length === 0) {
+      projectRows = `<tr><td colspan="6" style="text-align:center;padding:24px;color:#6b7280">No project mappings configured. Click "Add Project" to get started.</td></tr>`;
+    } else {
+      for (const slug of projectSlugs) {
+        const p = projects[slug];
+        projectRows += `<tr>
+          <td>${esc(slug)}</td>
+          <td>${esc(p.repo)}</td>
+          <td>${esc(p.branch)}</td>
+          <td>${esc(p.language)}</td>
+          <td>${esc(p.framework)}</td>
+          <td>
+            <button onclick="showEditModal('${esc(slug)}')" style="background:#334155;color:#e2e8f0;border:1px solid #475569;padding:4px 10px;border-radius:4px;cursor:pointer;margin-right:4px;font-size:12px">Edit</button>
+            <button onclick="confirmDelete('${esc(slug)}')" style="background:#7f1d1d;color:#fca5a5;border:1px solid #991b1b;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">Delete</button>
+          </td>
         </tr>`;
       }
     }
@@ -81,6 +142,26 @@ export function createServer({ config, secret, onIssue }) {
   .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:6px;animation:pulse 2s infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
   .footer{margin-top:24px;text-align:center;color:#475569;font-size:12px}
+  .section-header{display:flex;justify-content:space-between;align-items:center;margin:32px 0 12px}
+  .section-header h2{font-size:18px;color:#f8fafc}
+  .btn-add{background:#1d4ed8;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500}
+  .btn-add:hover{background:#2563eb}
+  .overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:100;justify-content:center;align-items:center}
+  .overlay.active{display:flex}
+  .modal{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;width:100%;max-width:480px}
+  .modal h3{font-size:16px;margin-bottom:16px;color:#f8fafc}
+  .modal label{display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;margin-top:12px}
+  .modal input{width:100%;padding:8px 12px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:14px}
+  .modal input:disabled{opacity:.5;cursor:not-allowed}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+  .modal-actions button{padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:500}
+  .btn-cancel{background:#334155;color:#e2e8f0}
+  .btn-save{background:#1d4ed8;color:#fff}
+  .btn-save:hover{background:#2563eb}
+  .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;color:#fff;font-size:14px;z-index:200;opacity:0;transition:opacity .3s}
+  .toast.show{opacity:1}
+  .toast.success{background:#065f46}
+  .toast.error{background:#991b1b}
 </style>
 </head><body>
 <div class="container">
@@ -96,8 +177,107 @@ export function createServer({ config, secret, onIssue }) {
     <thead><tr><th>Status</th><th>Title</th><th>Project</th><th>Repo</th><th>Attempts</th><th>PR</th></tr></thead>
     <tbody>${issueRows}</tbody>
   </table>
-  <div class="footer">Auto-refreshes every 30s &middot; <a href="/api/status">JSON API</a> &middot; <a href="/health">Health</a></div>
+
+  <div class="section-header">
+    <h2>Project Mappings</h2>
+    <button class="btn-add" onclick="showAddModal()">Add Project</button>
+  </div>
+  <table>
+    <thead><tr><th>Sentry Project</th><th>Repository</th><th>Branch</th><th>Language</th><th>Framework</th><th>Actions</th></tr></thead>
+    <tbody>${projectRows}</tbody>
+  </table>
+
+  <div class="footer">Auto-refreshes every 30s &middot; <a href="/api/status">JSON API</a> &middot; <a href="/api/projects">Projects API</a> &middot; <a href="/health">Health</a></div>
 </div>
+
+<div class="overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h3 id="modal-title">Add Project</h3>
+    <form id="project-form" onsubmit="submitProject(event)">
+      <input type="hidden" id="form-mode" value="add">
+      <label for="f-slug">Sentry Project Slug</label>
+      <input type="text" id="f-slug" required placeholder="my-sentry-project">
+      <label for="f-repo">Repository (org/repo)</label>
+      <input type="text" id="f-repo" required placeholder="my-org/my-repo">
+      <label for="f-branch">Branch</label>
+      <input type="text" id="f-branch" required placeholder="main" value="main">
+      <label for="f-lang">Language</label>
+      <input type="text" id="f-lang" required placeholder="javascript">
+      <label for="f-fw">Framework</label>
+      <input type="text" id="f-fw" required placeholder="react">
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-save">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function showAddModal(){
+  document.getElementById('modal-title').textContent='Add Project';
+  document.getElementById('form-mode').value='add';
+  document.getElementById('f-slug').value='';
+  document.getElementById('f-slug').disabled=false;
+  document.getElementById('f-repo').value='';
+  document.getElementById('f-branch').value='main';
+  document.getElementById('f-lang').value='';
+  document.getElementById('f-fw').value='';
+  document.getElementById('modal-overlay').classList.add('active');
+}
+function showEditModal(slug){
+  fetch('/api/projects').then(r=>r.json()).then(data=>{
+    const p=data.projects[slug];
+    if(!p)return showToast('Project not found','error');
+    document.getElementById('modal-title').textContent='Edit Project';
+    document.getElementById('form-mode').value='edit';
+    document.getElementById('f-slug').value=slug;
+    document.getElementById('f-slug').disabled=true;
+    document.getElementById('f-repo').value=p.repo;
+    document.getElementById('f-branch').value=p.branch;
+    document.getElementById('f-lang').value=p.language;
+    document.getElementById('f-fw').value=p.framework;
+    document.getElementById('modal-overlay').classList.add('active');
+  });
+}
+function closeModal(){
+  document.getElementById('modal-overlay').classList.remove('active');
+}
+function submitProject(e){
+  e.preventDefault();
+  const mode=document.getElementById('form-mode').value;
+  const slug=document.getElementById('f-slug').value.trim();
+  const body={repo:document.getElementById('f-repo').value.trim(),branch:document.getElementById('f-branch').value.trim(),language:document.getElementById('f-lang').value.trim(),framework:document.getElementById('f-fw').value.trim()};
+  let url,method;
+  if(mode==='add'){
+    url='/api/projects';method='POST';body.sentryProjectSlug=slug;
+  }else{
+    url='/api/projects/'+encodeURIComponent(slug);method='PUT';
+  }
+  fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>{
+    if(!r.ok)return r.json().then(d=>{throw new Error(d.error||'Request failed')});
+    return r.json();
+  }).then(()=>{
+    closeModal();showToast(mode==='add'?'Project added':'Project updated','success');
+    setTimeout(()=>location.reload(),600);
+  }).catch(err=>showToast(err.message,'error'));
+}
+function confirmDelete(slug){
+  if(!confirm('Delete project "'+slug+'"?'))return;
+  fetch('/api/projects/'+encodeURIComponent(slug),{method:'DELETE'}).then(r=>{
+    if(!r.ok)return r.json().then(d=>{throw new Error(d.error||'Delete failed')});
+    showToast('Project deleted','success');
+    setTimeout(()=>location.reload(),600);
+  }).catch(err=>showToast(err.message,'error'));
+}
+function showToast(msg,type){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.className='toast show '+type;
+  setTimeout(()=>t.classList.remove('show'),3000);
+}
+</script>
 </body></html>`);
   });
 
@@ -132,7 +312,7 @@ export function createServer({ config, secret, onIssue }) {
     }
 
     // Check if we have a project mapping for this
-    const projectConfig = config.projects[parsed.projectSlug];
+    const projectConfig = getProject(parsed.projectSlug);
     if (!projectConfig) {
       console.log(`[webhook] No config for project "${parsed.projectSlug}", skipping`);
       return res.status(200).json({ ok: true, ignored: true, reason: "unmapped project" });
