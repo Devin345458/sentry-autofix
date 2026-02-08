@@ -22,7 +22,7 @@ const REPOS_DIR = resolve(process.env.REPOS_DIR || "/tmp/sentry-autofix-repos");
 const DB_PATH = resolve(process.env.DB_PATH || "./data/sentry-autofix.db");
 const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_FIXES || "1", 10);
 const MAX_ATTEMPTS = parseInt(process.env.MAX_ATTEMPTS_PER_ISSUE || "2", 10);
-const MAX_FILES = parseInt(process.env.MAX_FILES_CHANGED || "5", 10);
+// MAX_FILES_CHANGED no longer needed - Claude Code manages edits directly
 
 // --- Init ---
 mkdirSync(REPOS_DIR, { recursive: true });
@@ -66,7 +66,6 @@ async function handleIssue(parsed, projectConfig) {
       parsed,
       projectConfig,
       reposDir: REPOS_DIR,
-      maxFilesChanged: MAX_FILES,
     });
 
     if (!result.success) {

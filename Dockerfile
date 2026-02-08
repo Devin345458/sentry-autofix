@@ -10,6 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
 WORKDIR /app
 
 # Install dependencies
@@ -26,8 +29,11 @@ ENV NODE_ENV=production
 ENV DB_PATH=/data/sentry-autofix.db
 ENV REPOS_DIR=/repos
 ENV PORT=3000
-ENV OLLAMA_HOST=http://host.docker.internal:11434
-ENV OLLAMA_MODEL=qwen2.5
+
+# Claude Code pointed at local Ollama
+ENV ANTHROPIC_BASE_URL=http://host.docker.internal:11434
+ENV ANTHROPIC_API_KEY=""
+ENV ANTHROPIC_MODEL=qwen2.5-coder:14b
 
 EXPOSE 3000
 

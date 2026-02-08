@@ -9,13 +9,14 @@ services:
       - sentry-autofix-repos:/repos
     environment:
       - SENTRY_CLIENT_SECRET=${SENTRY_CLIENT_SECRET}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GH_TOKEN=${GH_TOKEN}
+      - ANTHROPIC_BASE_URL=http://host.docker.internal:11434
+      - ANTHROPIC_API_KEY=""
+      - ANTHROPIC_MODEL=qwen2.5-coder:14b
       - CONFIG_PATH=/app/config.json
       - PORT=3000
       - MAX_CONCURRENT_FIXES=1
       - MAX_ATTEMPTS_PER_ISSUE=2
-      - MAX_FILES_CHANGED=5
     configs:
       - source: project_config
         target: /app/config.json
