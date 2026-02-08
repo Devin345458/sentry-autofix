@@ -59,6 +59,16 @@ export function markStatus(sentryIssueId, status, prUrl = null) {
   `).run(status, prUrl, sentryIssueId);
 }
 
+export function getAllIssues(limit = 50) {
+  return db.prepare("SELECT * FROM issues ORDER BY updated_at DESC LIMIT ?").all(limit);
+}
+
+export function getStats() {
+  const total = db.prepare("SELECT COUNT(*) as count FROM issues").get().count;
+  const byStatus = db.prepare("SELECT status, COUNT(*) as count FROM issues GROUP BY status").all();
+  return { total, byStatus };
+}
+
 export function shouldAttempt(sentryIssueId, maxAttempts) {
   const issue = getIssue(sentryIssueId);
   if (!issue) return true;
