@@ -1,0 +1,32 @@
+services:
+  sentry-autofix:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - sentry-autofix-data:/data
+      - sentry-autofix-repos:/repos
+    environment:
+      - SENTRY_CLIENT_SECRET=${SENTRY_CLIENT_SECRET}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GH_TOKEN=${GH_TOKEN}
+      - CONFIG_PATH=/app/config.json
+      - PORT=3000
+      - MAX_CONCURRENT_FIXES=1
+      - MAX_ATTEMPTS_PER_ISSUE=2
+      - MAX_FILES_CHANGED=5
+    configs:
+      - source: project_config
+        target: /app/config.json
+
+configs:
+  project_config:
+    content: |
+      {
+        "projects": {}
+      }
+
+volumes:
+  sentry-autofix-data:
+  sentry-autofix-repos:
