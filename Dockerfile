@@ -1,6 +1,6 @@
 FROM node:20-bookworm-slim
 
-# Install git, gh CLI, and curl
+# Install git, gh CLI
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -9,9 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install Claude Code CLI globally
-RUN npm install -g @anthropic-ai/claude-code
 
 WORKDIR /app
 
@@ -29,6 +26,8 @@ ENV NODE_ENV=production
 ENV DB_PATH=/data/sentry-autofix.db
 ENV REPOS_DIR=/repos
 ENV PORT=3000
+ENV OLLAMA_HOST=http://host.docker.internal:11434
+ENV OLLAMA_MODEL=qwen2.5
 
 EXPOSE 3000
 
