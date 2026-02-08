@@ -1,6 +1,7 @@
 import express from "express";
 import { verifySentrySignature } from "./verify.js";
 import { parseEventAlert, parseIssueEvent } from "./parser.js";
+import { fetchLatestEvent } from "./sentry-api.js";
 import { getAllIssues, getStats, getAllProjects, getProject, createProject, updateProject, deleteProject } from "./db.js";
 
 export function createServer({ secret, onIssue }) {
@@ -321,8 +322,22 @@ function showToast(msg,type){
     // Respond immediately, process async
     res.status(202).json({ ok: true, issueId: parsed.issueId });
 
-    // Queue the fix
-    onIssue(parsed, projectConfig).catch((err) => {
+    // Enrich issue webhooks with full event data from Sentry API, then process
+    (async () => {
+      if (resource === "issue" && !parsed.stacktrace) {
+        const orgSlug = process.env.SENTRY_ORG_SLUG;
+        if (orgSlug) {
+          const enrichment = await fetchLatestEvent(orgSlug, parsed.issueId);
+          if (enrichment) {
+            Object.assign(parsed, enrichment);
+            console.log(`[webhook] Enriched issue ${parsed.issueId} with event data (stacktrace: ${!!parsed.stacktrace})`);
+          }
+        } else {
+          console.warn("[webhook] SENTRY_ORG_SLUG not set, cannot enrich issue with event data");
+        }
+      }
+      await onIssue(parsed, projectConfig);
+    })().catch((err) => {
       console.error(`[webhook] Error processing issue ${parsed.issueId}:`, err.message);
     });
   });
