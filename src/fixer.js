@@ -129,20 +129,21 @@ function buildPrompt(parsed, projectConfig) {
 async function runClaudeCode(cwd, prompt, log) {
   return new Promise((resolve, reject) => {
     const args = [
-      "--print",        // non-interactive mode, output result and exit
+      "--print",
+      "--output-format", "stream-json",
       "--model", MODEL,
       "--allowedTools", "Read,Glob,Grep,Edit,Write",
       prompt,
     ];
 
-    let stdout = "";
+    let resultText = "";
     let stderr = "";
     let stdoutBuffer = "";
     let stderrBuffer = "";
 
     const proc = spawn(CLAUDE_BIN, args, {
       cwd,
-      timeout: 600_000, // 10 min timeout
+      timeout: 600_000,
       env: {
         ...process.env,
         PATH: process.env.PATH,
@@ -150,13 +151,22 @@ async function runClaudeCode(cwd, prompt, log) {
     });
 
     proc.stdout.on("data", (data) => {
-      const chunk = data.toString();
-      stdout += chunk;
-      stdoutBuffer += chunk;
+      stdoutBuffer += data.toString();
       const lines = stdoutBuffer.split("\n");
-      stdoutBuffer = lines.pop(); // keep incomplete last line in buffer
+      stdoutBuffer = lines.pop();
       for (const line of lines) {
-        if (line.trim()) log("claude", line);
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          parseClaudeEvent(event, log);
+          // Capture final result text
+          if (event.type === "result" && event.result) {
+            resultText = event.result;
+          }
+        } catch {
+          // Non-JSON line, log it as-is
+          log("claude", line);
+        }
       }
     });
 
@@ -173,12 +183,20 @@ async function runClaudeCode(cwd, prompt, log) {
 
     proc.on("close", (code) => {
       // Flush remaining buffers
-      if (stdoutBuffer.trim()) log("claude", stdoutBuffer);
+      if (stdoutBuffer.trim()) {
+        try {
+          const event = JSON.parse(stdoutBuffer);
+          parseClaudeEvent(event, log);
+          if (event.type === "result" && event.result) resultText = event.result;
+        } catch {
+          log("claude", stdoutBuffer);
+        }
+      }
       if (stderrBuffer.trim()) log("claude-stderr", stderrBuffer);
       if (code !== 0) {
         console.warn(`[fixer] Claude Code stderr: ${stderr}`);
       }
-      resolve(stdout);
+      resolve(resultText);
     });
 
     proc.on("error", (err) => {
@@ -186,6 +204,48 @@ async function runClaudeCode(cwd, prompt, log) {
       reject(new Error(`Failed to run Claude Code: ${err.message}`));
     });
   });
+}
+
+function parseClaudeEvent(event, log) {
+  // Handle assistant messages (tool calls, text output)
+  if (event.type === "assistant" && event.message?.content) {
+    for (const block of event.message.content) {
+      if (block.type === "tool_use") {
+        const name = block.name;
+        const input = block.input || {};
+        if (name === "Read") {
+          log("claude", `Reading: ${input.file_path || "file"}`);
+        } else if (name === "Edit") {
+          log("claude", `Editing: ${input.file_path || "file"}`);
+        } else if (name === "Write") {
+          log("claude", `Writing: ${input.file_path || "file"}`);
+        } else if (name === "Glob") {
+          log("claude", `Searching files: ${input.pattern || ""}`);
+        } else if (name === "Grep") {
+          log("claude", `Searching for: ${input.pattern || ""}`);
+        } else {
+          log("claude", `Tool: ${name}`);
+        }
+      } else if (block.type === "text" && block.text) {
+        // Truncate long text blocks to keep logs readable
+        const text = block.text.length > 200 ? block.text.slice(0, 200) + "..." : block.text;
+        log("claude", text);
+      }
+    }
+  }
+
+  // Handle tool results
+  if (event.type === "tool" && event.content) {
+    // Tool results can be verbose — just note completion
+  }
+
+  // Handle final result
+  if (event.type === "result") {
+    const cost = event.cost_usd ? `$${event.cost_usd.toFixed(4)}` : "";
+    const duration = event.duration_ms ? `${(event.duration_ms / 1000).toFixed(1)}s` : "";
+    const parts = [cost, duration].filter(Boolean).join(", ");
+    if (parts) log("claude", `Done (${parts})`);
+  }
 }
 
 async function ensureRepo(repo, defaultBranch, repoDir) {
