@@ -131,6 +131,8 @@ async function runClaudeCode(cwd, prompt, log) {
     const args = [
       "--print",
       "--output-format", "stream-json",
+      "--verbose",
+      "--include-partial-messages",
       "--model", MODEL,
       "--allowedTools", "Read,Glob,Grep,Edit,Write",
       prompt,
@@ -206,45 +208,82 @@ async function runClaudeCode(cwd, prompt, log) {
   });
 }
 
+// Track partial tool_use inputs as they stream in
+const pendingToolUse = { name: null, inputJson: "" };
+
 function parseClaudeEvent(event, log) {
-  // Handle assistant messages (tool calls, text output)
-  if (event.type === "assistant" && event.message?.content) {
+  // --- Streaming delta events (from --verbose --include-partial-messages) ---
+  if (event.type === "stream_event") {
+    const inner = event.event || {};
+
+    // content_block_start: a new content block begins (text or tool_use)
+    if (inner.type === "content_block_start" && inner.content_block) {
+      const block = inner.content_block;
+      if (block.type === "tool_use") {
+        pendingToolUse.name = block.name || null;
+        pendingToolUse.inputJson = "";
+      }
+    }
+
+    // content_block_delta: streaming text or tool input
+    if (inner.type === "content_block_delta" && inner.delta) {
+      // We don't log text deltas individually — too noisy
+      // But we accumulate tool input JSON
+      if (inner.delta.type === "input_json_delta" && inner.delta.partial_json) {
+        pendingToolUse.inputJson += inner.delta.partial_json;
+      }
+    }
+
+    // content_block_stop: block is complete — log tool calls here
+    if (inner.type === "content_block_stop") {
+      if (pendingToolUse.name) {
+        logToolUse(pendingToolUse.name, pendingToolUse.inputJson, log);
+        pendingToolUse.name = null;
+        pendingToolUse.inputJson = "";
+      }
+    }
+
+    return;
+  }
+
+  // --- Complete message events (non-streaming fallback) ---
+  if (event.type === "message" && event.message?.content) {
     for (const block of event.message.content) {
       if (block.type === "tool_use") {
-        const name = block.name;
-        const input = block.input || {};
-        if (name === "Read") {
-          log("claude", `Reading: ${input.file_path || "file"}`);
-        } else if (name === "Edit") {
-          log("claude", `Editing: ${input.file_path || "file"}`);
-        } else if (name === "Write") {
-          log("claude", `Writing: ${input.file_path || "file"}`);
-        } else if (name === "Glob") {
-          log("claude", `Searching files: ${input.pattern || ""}`);
-        } else if (name === "Grep") {
-          log("claude", `Searching for: ${input.pattern || ""}`);
-        } else {
-          log("claude", `Tool: ${name}`);
-        }
+        logToolUse(block.name, JSON.stringify(block.input || {}), log);
       } else if (block.type === "text" && block.text) {
-        // Truncate long text blocks to keep logs readable
         const text = block.text.length > 200 ? block.text.slice(0, 200) + "..." : block.text;
         log("claude", text);
       }
     }
+    return;
   }
 
-  // Handle tool results
-  if (event.type === "tool" && event.content) {
-    // Tool results can be verbose — just note completion
-  }
-
-  // Handle final result
+  // --- Final result ---
   if (event.type === "result") {
     const cost = event.cost_usd ? `$${event.cost_usd.toFixed(4)}` : "";
     const duration = event.duration_ms ? `${(event.duration_ms / 1000).toFixed(1)}s` : "";
     const parts = [cost, duration].filter(Boolean).join(", ");
     if (parts) log("claude", `Done (${parts})`);
+  }
+}
+
+function logToolUse(name, inputJson, log) {
+  let input = {};
+  try { input = JSON.parse(inputJson); } catch { /* partial or empty */ }
+
+  if (name === "Read") {
+    log("claude", `Reading: ${input.file_path || "file"}`);
+  } else if (name === "Edit") {
+    log("claude", `Editing: ${input.file_path || "file"}`);
+  } else if (name === "Write") {
+    log("claude", `Writing: ${input.file_path || "file"}`);
+  } else if (name === "Glob") {
+    log("claude", `Searching files: ${input.pattern || ""}`);
+  } else if (name === "Grep") {
+    log("claude", `Searching for: ${input.pattern || ""}`);
+  } else {
+    log("claude", `Tool: ${name}`);
   }
 }
 
