@@ -181,6 +181,8 @@ async function runClaudeCode(
     let stdoutBuffer = ''
     let stderrBuffer = ''
 
+    onLog('claude', `Spawning: ${claudeCodePath} --print --model ${claudeModel} ...`)
+
     const proc = spawn(claudeCodePath, args, {
       cwd,
       timeout: 600_000,
@@ -189,6 +191,8 @@ async function runClaudeCode(
         PATH: process.env.PATH,
       },
     })
+
+    onLog('claude', `Process started (PID ${proc.pid})`)
 
     proc.stdout.on('data', (data: Buffer) => {
       stdoutBuffer += data.toString()
@@ -221,7 +225,7 @@ async function runClaudeCode(
       }
     })
 
-    proc.on('close', (code: number | null) => {
+    proc.on('close', (code: number | null, signal: string | null) => {
       // Flush remaining buffers
       if (stdoutBuffer.trim()) {
         try {
@@ -233,9 +237,22 @@ async function runClaudeCode(
         }
       }
       if (stderrBuffer.trim()) onLog('claude-stderr', stderrBuffer)
-      if (code !== 0) {
-        console.warn(`[fixer] Claude Code stderr: ${stderr}`)
+
+      // Log exit details
+      if (signal) {
+        onLog('claude', `Process killed by signal ${signal} (likely timeout)`)
       }
+      if (code !== null && code !== 0) {
+        onLog('claude', `Process exited with code ${code}`)
+      }
+      if (stderr.trim()) {
+        // Log full stderr so user can see what went wrong
+        onLog('claude-stderr', stderr.trim())
+      }
+      if (!resultText && !signal && code === 0) {
+        onLog('claude', 'Process exited cleanly but produced no result')
+      }
+
       resolve(resultText)
     })
 
