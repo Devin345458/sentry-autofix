@@ -94,7 +94,7 @@ export function createServer({ secret, onIssue }) {
     // Send existing logs as initial burst
     const existing = getLogsForIssue(issueId);
     for (const log of existing) {
-      res.write(`data: ${JSON.stringify({ type: "log", issueId, source: log.source, message: log.message, timestamp: log.timestamp })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "log", id: log.id, issueId, source: log.source, message: log.message, timestamp: log.timestamp })}\n\n`);
     }
     res.write(`data: ${JSON.stringify({ type: "history_end", count: existing.length })}\n\n`);
 
@@ -828,7 +828,16 @@ function openLogs(issueId,title){
 
   if(logSSE)logSSE.close();
   logSSE=new EventSource('/api/issues/'+encodeURIComponent(issueId)+'/logs');
+  let seenIds=new Set();
   let hasLogs=false;
+
+  // On reconnect, EventSource re-opens and server sends the full burst again.
+  // Clear output so we don't get duplicates.
+  logSSE.onopen=()=>{
+    seenIds.clear();
+    hasLogs=false;
+    document.getElementById('log-output').innerHTML='';
+  };
 
   logSSE.onmessage=(e)=>{
     try{
@@ -838,6 +847,11 @@ function openLogs(issueId,title){
         return;
       }
       if(d.type!=='log')return;
+      // Deduplicate by DB id if available
+      if(d.id){
+        if(seenIds.has(d.id))return;
+        seenIds.add(d.id);
+      }
       if(!hasLogs){document.getElementById('log-output').innerHTML='';hasLogs=true}
       const out=document.getElementById('log-output');
       const line=document.createElement('div');
