@@ -155,6 +155,17 @@ export function seedProjectsFromConfig(configProjects) {
   return seeded;
 }
 
+export function getStuckIssues() {
+  return db.prepare("SELECT * FROM issues WHERE status = 'in_progress'").all();
+}
+
+export function resetStuckIssue(sentryIssueId) {
+  db.prepare(`
+    UPDATE issues SET status = 'pending', attempts = MAX(attempts - 1, 0), updated_at = datetime('now')
+    WHERE sentry_issue_id = ?
+  `).run(sentryIssueId);
+}
+
 // --- Issue Logs ---
 
 export function insertLog(sentryIssueId, source, message) {

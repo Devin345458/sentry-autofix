@@ -3,10 +3,11 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { mkdirSync } from "fs";
 import { createServer } from "./server.js";
-import { initDb, upsertIssue, shouldAttempt, incrementAttempts, markStatus, seedProjectsFromConfig, getAllProjects, insertLog } from "./db.js";
+import { initDb, upsertIssue, shouldAttempt, incrementAttempts, markStatus, seedProjectsFromConfig, getAllProjects, insertLog, getStuckIssues, resetStuckIssue, getProject } from "./db.js";
 import { fixIssue } from "./fixer.js";
 import { createPullRequest, ensureLabel } from "./github.js";
 import { broadcast } from "./events.js";
+import { fetchLatestEvent } from "./sentry-api.js";
 
 // --- Config ---
 const configPath = resolve(process.env.CONFIG_PATH || "./config.json");
@@ -122,6 +123,54 @@ async function handleIssue(parsed, projectConfig) {
   }
 }
 
+// --- Recover stuck issues on startup ---
+async function recoverStuckIssues() {
+  const stuck = getStuckIssues();
+  if (stuck.length === 0) return;
+
+  console.log(`[recovery] Found ${stuck.length} stuck issue(s), reprocessing...`);
+
+  for (const issue of stuck) {
+    // Reset status and don't count the interrupted attempt
+    resetStuckIssue(issue.sentry_issue_id);
+    insertLog(issue.sentry_issue_id, "system", "Issue was stuck in_progress after restart — retrying.");
+
+    const projectConfig = getProject(issue.sentry_project);
+    if (!projectConfig) {
+      console.warn(`[recovery] No project config for ${issue.sentry_project}, skipping issue ${issue.sentry_issue_id}`);
+      markStatus(issue.sentry_issue_id, "error");
+      insertLog(issue.sentry_issue_id, "error", `No project mapping found for "${issue.sentry_project}"`);
+      continue;
+    }
+
+    // Reconstruct a parsed object from DB fields
+    const parsed = {
+      issueId: issue.sentry_issue_id,
+      projectSlug: issue.sentry_project,
+      title: issue.title,
+      level: issue.level || "error",
+      message: issue.error_message || issue.title,
+      stacktrace: null,
+    };
+
+    // Enrich with Sentry API if possible
+    const orgSlug = process.env.SENTRY_ORG_SLUG;
+    if (orgSlug) {
+      try {
+        const enrichment = await fetchLatestEvent(orgSlug, parsed.issueId);
+        if (enrichment) {
+          Object.assign(parsed, enrichment);
+        }
+      } catch (err) {
+        console.warn(`[recovery] Failed to enrich issue ${parsed.issueId}:`, err.message);
+      }
+    }
+
+    console.log(`[recovery] Re-queuing issue ${parsed.issueId}: ${parsed.title}`);
+    handleIssue(parsed, projectConfig);
+  }
+}
+
 // --- Start Server ---
 const app = createServer({ secret: SECRET, onIssue: handleIssue });
 
@@ -132,4 +181,9 @@ app.listen(PORT, () => {
   console.log(`[sentry-autofix] Repos dir: ${REPOS_DIR}`);
   console.log(`[sentry-autofix] Max concurrent fixes: ${MAX_CONCURRENT}`);
   console.log(`[sentry-autofix] Max attempts per issue: ${MAX_ATTEMPTS}`);
+
+  // Recover any issues left stuck from a previous run
+  recoverStuckIssues().catch((err) => {
+    console.error("[recovery] Failed to recover stuck issues:", err.message);
+  });
 });
