@@ -39,6 +39,19 @@ export function initDb(dbPath) {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_logs_issue ON issue_logs(sentry_issue_id)`);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS webhook_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT DEFAULT (datetime('now')),
+      resource TEXT NOT NULL,
+      action TEXT,
+      issue_id TEXT,
+      project_slug TEXT,
+      decision TEXT NOT NULL,
+      reason TEXT
+    )
+  `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       sentry_project_slug TEXT PRIMARY KEY,
       repo TEXT NOT NULL,
@@ -181,4 +194,17 @@ export function getLogsForIssue(sentryIssueId, sinceId = 0) {
     WHERE sentry_issue_id = ? AND id > ?
     ORDER BY id ASC
   `).all(sentryIssueId, sinceId);
+}
+
+// --- Webhook Log ---
+
+export function insertWebhookLog({ resource, action, issueId, projectSlug, decision, reason }) {
+  return db.prepare(`
+    INSERT INTO webhook_log (resource, action, issue_id, project_slug, decision, reason)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(resource, action || null, issueId || null, projectSlug || null, decision, reason || null);
+}
+
+export function getWebhookLogs(limit = 200) {
+  return db.prepare("SELECT * FROM webhook_log ORDER BY id DESC LIMIT ?").all(limit);
 }

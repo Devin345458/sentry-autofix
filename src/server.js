@@ -2,7 +2,7 @@ import express from "express";
 import { verifySentrySignature } from "./verify.js";
 import { parseEventAlert, parseIssueEvent } from "./parser.js";
 import { fetchLatestEvent } from "./sentry-api.js";
-import { getAllIssues, getStats, getAllProjects, getProject, createProject, updateProject, deleteProject, getLogsForIssue } from "./db.js";
+import { getAllIssues, getStats, getAllProjects, getProject, createProject, updateProject, deleteProject, getLogsForIssue, insertWebhookLog, getWebhookLogs } from "./db.js";
 import { subscribe, unsubscribe } from "./events.js";
 
 export function createServer({ secret, onIssue }) {
@@ -742,6 +742,8 @@ export function createServer({ secret, onIssue }) {
     <a href="/api/projects">projects</a>
     <span class="sep">|</span>
     <a href="/health">health</a>
+    <span class="sep">|</span>
+    <a href="/webhooks">webhooks</a>
   </div>
 </div>
 
@@ -943,16 +945,19 @@ function esc(s){
   app.post("/webhook/sentry", (req, res) => {
     const signature = req.headers["sentry-hook-signature"];
     const resource = req.headers["sentry-hook-resource"];
+    const action = req.body.action;
 
     // Verify signature
     if (!signature || !verifySentrySignature(req.rawBody, signature, secret)) {
       console.warn("[webhook] Invalid or missing signature");
+      insertWebhookLog({ resource: resource || "unknown", action, decision: "rejected", reason: "invalid signature" });
       return res.status(401).json({ error: "Invalid signature" });
     }
 
     // Handle installation verification (Sentry sends this when you first set up)
     if (resource === "installation") {
-      console.log("[webhook] Installation event:", req.body.action);
+      console.log("[webhook] Installation event:", action);
+      insertWebhookLog({ resource, action, decision: "ok", reason: "installation handshake" });
       return res.status(200).json({ ok: true });
     }
 
@@ -965,7 +970,8 @@ function esc(s){
     }
 
     if (!parsed) {
-      console.log(`[webhook] Ignoring ${resource} event (action: ${req.body.action})`);
+      console.log(`[webhook] Ignoring ${resource} event (action: ${action})`);
+      insertWebhookLog({ resource: resource || "unknown", action, decision: "ignored", reason: "unsupported resource or missing data" });
       return res.status(200).json({ ok: true, ignored: true });
     }
 
@@ -973,8 +979,12 @@ function esc(s){
     const projectConfig = getProject(parsed.projectSlug);
     if (!projectConfig) {
       console.log(`[webhook] No config for project "${parsed.projectSlug}", skipping`);
+      insertWebhookLog({ resource, action, issueId: parsed.issueId, projectSlug: parsed.projectSlug, decision: "skipped", reason: "unmapped project" });
       return res.status(200).json({ ok: true, ignored: true, reason: "unmapped project" });
     }
+
+    // Log as accepted — dedup happens downstream in onIssue via upsertIssue/shouldAttempt
+    insertWebhookLog({ resource, action, issueId: parsed.issueId, projectSlug: parsed.projectSlug, decision: "accepted" });
 
     // Respond immediately, process async
     res.status(202).json({ ok: true, issueId: parsed.issueId });
@@ -997,6 +1007,110 @@ function esc(s){
     })().catch((err) => {
       console.error(`[webhook] Error processing issue ${parsed.issueId}:`, err.message);
     });
+  });
+
+  // --- Webhook Debug API ---
+  app.get("/api/webhooks", (_req, res) => {
+    const logs = getWebhookLogs(200);
+    res.json({ logs });
+  });
+
+  // --- Webhook Debug Page ---
+  app.get("/webhooks", (_req, res) => {
+    const logs = getWebhookLogs(200);
+
+    let rows = "";
+    if (logs.length === 0) {
+      rows = `<tr class="empty-row"><td colspan="7">No webhook events received yet.</td></tr>`;
+    } else {
+      for (const log of logs) {
+        const decClass = log.decision === "accepted" ? "s-ok" : log.decision === "rejected" ? "s-err" : log.decision === "skipped" ? "s-warn" : "s-muted";
+        rows += `<tr>
+          <td class="td-mono" style="white-space:nowrap">${esc(log.timestamp)}</td>
+          <td class="td-mono">${esc(log.resource)}</td>
+          <td class="td-mono">${esc(log.action || "-")}</td>
+          <td class="td-mono">${esc(log.issue_id || "-")}</td>
+          <td class="td-mono">${esc(log.project_slug || "-")}</td>
+          <td><span class="wh-badge ${decClass}">${esc(log.decision)}</span></td>
+          <td style="color:var(--text-muted);font-size:12px">${esc(log.reason || "-")}</td>
+        </tr>`;
+      }
+    }
+
+    res.send(`<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Webhook Debug - Sentry Autofix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-deep: #06080d; --bg-base: #0c1017; --bg-surface: #131922; --bg-raised: #1a2233; --bg-hover: #1f2b3d;
+    --border: #1e293b; --border-subtle: #162032;
+    --text-primary: #e8ecf2; --text-secondary: #7a8ba4; --text-muted: #4a5a72;
+    --accent: #d4943a; --accent-dim: rgba(212,148,58,.12); --accent-glow: rgba(212,148,58,.25);
+    --green: #22c55e; --green-dim: rgba(34,197,94,.1);
+    --yellow: #eab308; --yellow-dim: rgba(234,179,8,.1);
+    --red: #ef4444; --red-dim: rgba(239,68,68,.1);
+    --mono: 'JetBrains Mono', monospace; --sans: 'Outfit', sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body { font-family: var(--sans); background: var(--bg-deep); color: var(--text-primary); min-height: 100vh;
+    background-image: radial-gradient(circle at 1px 1px, rgba(212,148,58,.04) 1px, transparent 0); background-size: 32px 32px; }
+  .header-bar { background: rgba(12,16,23,.85); border-bottom: 1px solid var(--border); padding: 0 24px; position: sticky; top: 0; z-index: 50; backdrop-filter: blur(12px); }
+  .header-inner { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; height: 56px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .brand-icon { width: 28px; height: 28px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 16px var(--accent-glow); }
+  .brand-icon svg { width: 16px; height: 16px; }
+  .brand-name { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.3px; }
+  .brand-sub { font-family: var(--mono); font-size: 12px; color: var(--text-muted); margin-left: 8px; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 28px 24px 48px; }
+  .section-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .section-hdr h2 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .section-hdr .count { font-family: var(--mono); font-size: 11px; background: var(--bg-raised); border: 1px solid var(--border); padding: 2px 8px; border-radius: 10px; color: var(--text-secondary); }
+  .tbl-wrap { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 10px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { text-align: left; padding: 10px 16px; background: var(--bg-raised); border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-muted); }
+  tbody td { padding: 10px 16px; border-top: 1px solid var(--border-subtle); font-size: 13px; color: var(--text-secondary); }
+  tbody tr:first-child td { border-top: none; }
+  tbody tr:hover { background: var(--bg-hover); }
+  .td-mono { font-family: var(--mono); font-size: 12px; }
+  .empty-row td { text-align: center; padding: 40px 16px; color: var(--text-muted); font-size: 13px; }
+  .wh-badge { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 100px; white-space: nowrap; }
+  .wh-badge.s-ok { color: var(--green); background: var(--green-dim); }
+  .wh-badge.s-err { color: var(--red); background: var(--red-dim); }
+  .wh-badge.s-warn { color: var(--yellow); background: var(--yellow-dim); }
+  .wh-badge.s-muted { color: var(--text-secondary); background: rgba(122,139,164,.1); }
+  a { color: #3b82f6; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .back-link { font-family: var(--mono); font-size: 12px; color: var(--text-secondary); }
+</style>
+</head><body>
+<div class="header-bar">
+  <div class="header-inner">
+    <div style="display:flex;align-items:center">
+      <a href="/" class="brand">
+        <div class="brand-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#0c1017" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
+        <span class="brand-name">sentry-autofix</span>
+      </a>
+      <span class="brand-sub">/ webhooks</span>
+    </div>
+    <a href="/" class="back-link">&larr; dashboard</a>
+  </div>
+</div>
+<div class="container">
+  <div class="section-hdr">
+    <h2>Webhook Log <span class="count">${logs.length}</span></h2>
+  </div>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Timestamp</th><th>Resource</th><th>Action</th><th>Issue ID</th><th>Project</th><th>Decision</th><th>Reason</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  </div>
+</div>
+</body></html>`);
   });
 
   return app;
