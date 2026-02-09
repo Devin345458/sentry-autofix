@@ -46,7 +46,7 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     // Server-only (private)
-    claudeCodePath: process.env.CLAUDE_CODE_PATH || 'claude-code',
+    claudeCodePath: process.env.CLAUDE_CODE_PATH || '',
     claudeModel: process.env.CLAUDE_MODEL || 'sonnet-4-5',
     sentryAuthToken: process.env.SENTRY_AUTH_TOKEN || '',
     sentryWebhookSecret: process.env.SENTRY_WEBHOOK_SECRET || '',

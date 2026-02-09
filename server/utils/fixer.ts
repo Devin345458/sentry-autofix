@@ -7,6 +7,23 @@ import type { ProjectConfig } from './db'
 
 const execFileAsync = promisify(execFile)
 
+// Resolve Claude CLI binary: use explicit path from config, or find it in node_modules
+function resolveClaudeBin(configPath: string): string {
+  if (configPath) return configPath
+
+  // Try common locations relative to process.cwd()
+  const candidates = [
+    path.resolve(process.cwd(), 'node_modules', '.bin', 'claude'),
+    path.resolve(process.cwd(), '..', 'node_modules', '.bin', 'claude'),
+  ]
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate
+  }
+
+  // Fallback to PATH
+  return 'claude'
+}
+
 export interface FixResult {
   success: boolean
   reason?: string
@@ -53,9 +70,10 @@ export async function fixIssue(params: FixIssueParams): Promise<FixResult> {
   const prompt = buildPrompt(parsed, projectConfig)
 
   // 4. Run Claude Code CLI in the repo directory
-  onLog('claude', `Running Claude Code (${claudeModel})...`)
-  console.log(`[fixer] Running Claude Code (${claudeModel}) for issue ${parsed.issueId}...`)
-  const claudeOutput = await runClaudeCode(repoDir, prompt, claudeCodePath, claudeModel, onLog)
+  const claudeBin = resolveClaudeBin(claudeCodePath)
+  onLog('claude', `Running Claude Code (${claudeModel}) via ${claudeBin}...`)
+  console.log(`[fixer] Running Claude Code (${claudeModel}) via ${claudeBin} for issue ${parsed.issueId}...`)
+  const claudeOutput = await runClaudeCode(repoDir, prompt, claudeBin, claudeModel, onLog)
   onLog('claude', 'Claude Code finished.')
   console.log(`[fixer] Claude Code finished for issue ${parsed.issueId}`)
 
