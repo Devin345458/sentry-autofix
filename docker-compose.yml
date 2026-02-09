@@ -8,19 +8,15 @@ services:
       - sentry-autofix-data:/data
       - sentry-autofix-repos:/repos
     environment:
-      - SENTRY_WEBHOOK_SECRET=${SENTRY_WEBHOOK_SECRET}
-      - SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}
-      - SENTRY_ORG_SLUG=${SENTRY_ORG_SLUG}
+      - NUXT_SENTRY_WEBHOOK_SECRET=${NUXT_SENTRY_WEBHOOK_SECRET}
+      - NUXT_SENTRY_AUTH_TOKEN=${NUXT_SENTRY_AUTH_TOKEN}
+      - NUXT_SENTRY_ORG_SLUG=${NUXT_SENTRY_ORG_SLUG}
+      - NUXT_DB_PATH=/data/sentry-autofix.db
+      - NUXT_CONFIG_PATH=/app/config.json
+      - NUXT_REPOS_DIR=/repos
+      - NUXT_MAX_CONCURRENT_FIXES=1
+      - NUXT_MAX_ATTEMPTS_PER_ISSUE=2
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - CLAUDE_CODE_PATH=claude-code
-      - CLAUDE_MODEL=sonnet-4-5
-      - CONFIG_PATH=/app/config.json
-      - DB_PATH=/data/sentry-autofix.db
-      - REPOS_DIR=/repos
-      - PORT=3000
-      - MAX_CONCURRENT_FIXES=1
-      - MAX_ATTEMPTS_PER_ISSUE=2
     configs:
       - source: project_config
         target: /app/config.json

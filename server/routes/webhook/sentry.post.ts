@@ -5,12 +5,14 @@ import { handleIssue } from '../../utils/issue-handler'
 import { fetchLatestEvent } from '../../utils/sentry-api'
 
 export default defineEventHandler(async (event) => {
-  const webhookSecret = process.env.SENTRY_WEBHOOK_SECRET || process.env.SENTRY_CLIENT_SECRET || ''
-  const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN || ''
+  const { sentryWebhookSecret, sentryAuthToken, sentryOrgSlug, sentryBaseUrl } = useRuntimeConfig()
+
+  const resource = getHeader(event, 'sentry-hook-resource') || 'unknown'
 
   // Read raw body for HMAC verification
   const rawBody = await readRawBody(event, 'utf8')
   if (!rawBody) {
+    insertWebhookLog({ resource, action: 'unknown', issueId: null, issueTitle: null, projectSlug: null, decision: 'ignored', reason: 'Empty request body' })
     throw createError({ statusCode: 400, message: 'Empty body' })
   }
 
@@ -18,17 +20,24 @@ export default defineEventHandler(async (event) => {
   const signature = getHeader(event, 'sentry-hook-signature')
   if (!signature) {
     console.warn('[webhook] Missing sentry-hook-signature header')
+    insertWebhookLog({ resource, action: 'unknown', issueId: null, issueTitle: null, projectSlug: null, decision: 'ignored', reason: 'Missing sentry-hook-signature header' })
     throw createError({ statusCode: 401, message: 'Missing signature' })
   }
 
-  if (!verifySentrySignature(rawBody, signature, webhookSecret)) {
+  if (!sentryWebhookSecret) {
+    console.warn('[webhook] No SENTRY_WEBHOOK_SECRET configured — cannot verify signature')
+    insertWebhookLog({ resource, action: 'unknown', issueId: null, issueTitle: null, projectSlug: null, decision: 'ignored', reason: 'No SENTRY_WEBHOOK_SECRET env var configured' })
+    throw createError({ statusCode: 401, message: 'Webhook secret not configured' })
+  }
+
+  if (!verifySentrySignature(rawBody, signature, sentryWebhookSecret)) {
     console.warn('[webhook] Invalid signature')
+    insertWebhookLog({ resource, action: 'unknown', issueId: null, issueTitle: null, projectSlug: null, decision: 'ignored', reason: 'Invalid HMAC signature — check SENTRY_WEBHOOK_SECRET' })
     throw createError({ statusCode: 401, message: 'Invalid signature' })
   }
 
   // Parse JSON payload
   const payload = JSON.parse(rawBody)
-  const resource = getHeader(event, 'sentry-hook-resource') || 'unknown'
   const action = payload.action || 'unknown'
 
   console.log(`[webhook] Received ${resource} webhook with action: ${action}`)
@@ -42,9 +51,8 @@ export default defineEventHandler(async (event) => {
 
     // For issue webhooks, we need to enrich with the latest event
     if (parsed && sentryAuthToken) {
-      const orgSlug = process.env.SENTRY_ORG_SLUG
-      if (orgSlug) {
-        const enrichment = await fetchLatestEvent(sentryAuthToken, orgSlug, parsed.issueId)
+      if (sentryOrgSlug) {
+        const enrichment = await fetchLatestEvent(sentryAuthToken, sentryOrgSlug, parsed.issueId, sentryBaseUrl)
         if (enrichment) {
           Object.assign(parsed, enrichment)
         }

@@ -44,8 +44,19 @@ export default defineNuxtConfig({
 
   css: ['~/assets/styles/main.scss'],
 
-  // All server config reads process.env directly at runtime for Docker compatibility.
-  // No runtimeConfig needed — env vars are read in server/plugins and server/routes.
+  runtimeConfig: {
+    sentryWebhookSecret: '',
+    sentryAuthToken: '',
+    sentryOrgSlug: '',
+    sentryBaseUrl: 'https://sentry.io/api/0',
+    dbPath: './data/sentry-autofix.db',
+    configPath: './config.json',
+    reposDir: '/tmp/sentry-autofix-repos',
+    claudeModel: 'sonnet-4-5',
+    claudeCodePath: '',
+    maxConcurrentFixes: 1,
+    maxAttemptsPerIssue: 2,
+  },
 
   nitro: {
     experimental: {

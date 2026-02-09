@@ -27,13 +27,7 @@ RUN npm run build
 RUN mkdir -p /data /repos
 
 ENV NODE_ENV=production
-ENV DB_PATH=/data/sentry-autofix.db
-ENV REPOS_DIR=/repos
 ENV PORT=3000
-
-# Claude Code configuration (CLAUDE_CODE_PATH empty = auto-resolve from node_modules)
-ENV CLAUDE_CODE_PATH=
-ENV CLAUDE_MODEL=sonnet-4-5
 
 EXPOSE 3000
 

@@ -1,19 +1,19 @@
 import { readFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
-import { mkdirSync } from 'fs'
 import { initDb, seedProjectsFromConfig } from '../utils/db'
 
 export default defineNitroPlugin(() => {
-  const dbPath = resolve(process.env.DB_PATH || './data/sentry-autofix.db')
-  const configPath = resolve(process.env.CONFIG_PATH || './config.json')
+  const { dbPath, configPath } = useRuntimeConfig()
+  const resolvedDbPath = resolve(dbPath)
+  const resolvedConfigPath = resolve(configPath)
 
-  console.log('[sentry-autofix] Initializing database:', dbPath)
-  initDb(dbPath)
+  console.log('[sentry-autofix] Initializing database:', resolvedDbPath)
+  initDb(resolvedDbPath)
 
   // Seed projects from config.json if it exists
-  if (existsSync(configPath)) {
+  if (existsSync(resolvedConfigPath)) {
     try {
-      const configData = JSON.parse(readFileSync(configPath, 'utf8'))
+      const configData = JSON.parse(readFileSync(resolvedConfigPath, 'utf8'))
       if (configData.projects && Object.keys(configData.projects).length > 0) {
         const seeded = seedProjectsFromConfig(configData.projects)
         if (seeded > 0) {

@@ -24,6 +24,7 @@ interface HandleIssueConfig {
   claudeModel: string
   sentryAuthToken: string
   sentryOrgSlug: string
+  sentryBaseUrl: string
 }
 
 // Concurrency-limited queue
@@ -179,7 +180,7 @@ export async function retryIssue(issueId: string): Promise<void> {
   // Enrich with Sentry API if possible
   if (config.sentryOrgSlug && config.sentryAuthToken) {
     try {
-      const enrichment = await fetchLatestEvent(config.sentryAuthToken, config.sentryOrgSlug, parsed.issueId)
+      const enrichment = await fetchLatestEvent(config.sentryAuthToken, config.sentryOrgSlug, parsed.issueId, config.sentryBaseUrl)
       if (enrichment) {
         Object.assign(parsed, enrichment)
       }
@@ -231,7 +232,7 @@ export async function recoverStuckIssues(): Promise<void> {
     // Enrich with Sentry API if possible
     if (config.sentryOrgSlug && config.sentryAuthToken) {
       try {
-        const enrichment = await fetchLatestEvent(config.sentryAuthToken, config.sentryOrgSlug, parsed.issueId)
+        const enrichment = await fetchLatestEvent(config.sentryAuthToken, config.sentryOrgSlug, parsed.issueId, config.sentryBaseUrl)
         if (enrichment) {
           Object.assign(parsed, enrichment)
         }
