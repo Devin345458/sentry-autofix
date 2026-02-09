@@ -45,6 +45,14 @@
           variant="text"
           @click="$emit('viewLogs', item.sentry_issue_id)"
         />
+        <v-btn
+          v-if="item.status !== 'in_progress'"
+          icon="mdi-refresh"
+          size="small"
+          variant="text"
+          :loading="retrying === item.sentry_issue_id"
+          @click="retry(item.sentry_issue_id)"
+        />
       </template>
     </v-data-table>
   </v-card>
@@ -57,6 +65,21 @@ interface Props {
 
 defineProps<Props>()
 defineEmits(['viewLogs'])
+
+const { showToast } = useToast()
+const retrying = ref<string | null>(null)
+
+const retry = async (issueId: string) => {
+  retrying.value = issueId
+  try {
+    await $fetch(`/api/issues/${issueId}/retry`, { method: 'POST' })
+    showToast(`Issue ${issueId} queued for retry`, 'success')
+  } catch (err: any) {
+    showToast(err.data?.message || 'Retry failed', 'error')
+  } finally {
+    retrying.value = null
+  }
+}
 
 const headers = [
   { title: 'Issue ID', key: 'sentry_issue_id', sortable: true },

@@ -9,6 +9,7 @@ import {
   getStuckIssues,
   resetStuckIssue,
   getProject,
+  getIssue,
 } from './db'
 import { broadcast } from './events'
 import { fixIssue } from './fixer'
@@ -141,6 +142,54 @@ async function processIssue(parsed: ParsedEvent, projectConfig: ProjectConfig): 
     activeJobs--
     drainQueue()
   }
+}
+
+/**
+ * Manually retry an issue from the dashboard.
+ * Resets status to pending, reconstructs parsed data, and re-queues.
+ */
+export async function retryIssue(issueId: string): Promise<void> {
+  if (!config) {
+    throw new Error('Issue handler not initialized')
+  }
+
+  const issue = getIssue(issueId)
+  if (!issue) {
+    throw new Error(`Issue ${issueId} not found`)
+  }
+
+  const projectConfig = getProject(issue.sentry_project)
+  if (!projectConfig) {
+    throw new Error(`No project mapping for "${issue.sentry_project}"`)
+  }
+
+  // Reset status so it can be reprocessed
+  resetStuckIssue(issueId)
+  insertLog(issueId, 'system', 'Manual retry requested.')
+
+  const parsed: ParsedEvent = {
+    issueId: issue.sentry_issue_id,
+    projectSlug: issue.sentry_project,
+    title: issue.title,
+    level: issue.level || 'error',
+    message: issue.error_message || issue.title,
+    stacktrace: null,
+  }
+
+  // Enrich with Sentry API if possible
+  if (config.sentryOrgSlug && config.sentryAuthToken) {
+    try {
+      const enrichment = await fetchLatestEvent(config.sentryAuthToken, config.sentryOrgSlug, parsed.issueId)
+      if (enrichment) {
+        Object.assign(parsed, enrichment)
+      }
+    } catch (err: any) {
+      console.warn(`[retry] Failed to enrich issue ${parsed.issueId}:`, err.message)
+    }
+  }
+
+  console.log(`[retry] Re-queuing issue ${parsed.issueId}: ${parsed.title}`)
+  handleIssue(parsed, projectConfig)
 }
 
 /**
