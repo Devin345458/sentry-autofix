@@ -47,10 +47,10 @@ export default defineNuxtConfig({
   runtimeConfig: {
     // Server-only (private)
     claudeCodePath: process.env.CLAUDE_CODE_PATH || '',
-    claudeModel: process.env.CLAUDE_MODEL || 'sonnet-4-5',
+    claudeModel: process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || 'sonnet-4-5',
     sentryAuthToken: process.env.SENTRY_AUTH_TOKEN || '',
-    sentryWebhookSecret: process.env.SENTRY_WEBHOOK_SECRET || '',
-    githubToken: process.env.GITHUB_TOKEN || '',
+    sentryWebhookSecret: process.env.SENTRY_WEBHOOK_SECRET || process.env.SENTRY_CLIENT_SECRET || '',
+    githubToken: process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '',
     dbPath: process.env.DB_PATH || './sentry-autofix.db',
     configPath: process.env.CONFIG_PATH || './config.json',
     logLevel: process.env.LOG_LEVEL || 'info',
