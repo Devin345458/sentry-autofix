@@ -38,7 +38,7 @@ export function parseEventAlert(payload) {
 export function parseIssueEvent(payload) {
   const { data, action } = payload;
 
-  if (action !== "created") return null;
+  if (action !== "created" && action !== "regression") return null;
 
   const issue = data?.issue;
   if (!issue) return null;
