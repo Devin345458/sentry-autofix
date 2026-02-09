@@ -4,9 +4,8 @@ import { mkdirSync } from 'fs'
 import { initDb, seedProjectsFromConfig } from '../utils/db'
 
 export default defineNitroPlugin(() => {
-  const config = useRuntimeConfig()
-  const dbPath = resolve(config.dbPath)
-  const configPath = resolve(config.configPath)
+  const dbPath = resolve(process.env.DB_PATH || './data/sentry-autofix.db')
+  const configPath = resolve(process.env.CONFIG_PATH || './config.json')
 
   console.log('[sentry-autofix] Initializing database:', dbPath)
   initDb(dbPath)

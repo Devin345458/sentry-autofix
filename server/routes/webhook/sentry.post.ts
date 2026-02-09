@@ -5,7 +5,8 @@ import { handleIssue } from '../../utils/issue-handler'
 import { fetchLatestEvent } from '../../utils/sentry-api'
 
 export default defineEventHandler(async (event) => {
-  const config = useRuntimeConfig()
+  const webhookSecret = process.env.SENTRY_WEBHOOK_SECRET || process.env.SENTRY_CLIENT_SECRET || ''
+  const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN || ''
 
   // Read raw body for HMAC verification
   const rawBody = await readRawBody(event, 'utf8')
@@ -20,7 +21,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 401, message: 'Missing signature' })
   }
 
-  if (!verifySentrySignature(rawBody, signature, config.sentryWebhookSecret)) {
+  if (!verifySentrySignature(rawBody, signature, webhookSecret)) {
     console.warn('[webhook] Invalid signature')
     throw createError({ statusCode: 401, message: 'Invalid signature' })
   }
@@ -40,10 +41,10 @@ export default defineEventHandler(async (event) => {
     parsed = parseIssueEvent(payload)
 
     // For issue webhooks, we need to enrich with the latest event
-    if (parsed && config.sentryAuthToken) {
+    if (parsed && sentryAuthToken) {
       const orgSlug = process.env.SENTRY_ORG_SLUG
       if (orgSlug) {
-        const enrichment = await fetchLatestEvent(config.sentryAuthToken, orgSlug, parsed.issueId)
+        const enrichment = await fetchLatestEvent(sentryAuthToken, orgSlug, parsed.issueId)
         if (enrichment) {
           Object.assign(parsed, enrichment)
         }

@@ -44,22 +44,8 @@ export default defineNuxtConfig({
 
   css: ['~/assets/styles/main.scss'],
 
-  runtimeConfig: {
-    // Server-only (private)
-    claudeCodePath: process.env.CLAUDE_CODE_PATH || '',
-    claudeModel: process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || 'sonnet-4-5',
-    sentryAuthToken: process.env.SENTRY_AUTH_TOKEN || '',
-    sentryWebhookSecret: process.env.SENTRY_WEBHOOK_SECRET || process.env.SENTRY_CLIENT_SECRET || '',
-    githubToken: process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '',
-    dbPath: process.env.DB_PATH || './sentry-autofix.db',
-    configPath: process.env.CONFIG_PATH || './config.json',
-    logLevel: process.env.LOG_LEVEL || 'info',
-
-    // Public (available on client)
-    public: {
-      appName: 'Sentry AutoFix'
-    }
-  },
+  // All server config reads process.env directly at runtime for Docker compatibility.
+  // No runtimeConfig needed — env vars are read in server/plugins and server/routes.
 
   nitro: {
     experimental: {
