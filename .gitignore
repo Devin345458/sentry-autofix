@@ -3,3 +3,12 @@ data/
 .env
 config.json
 repos/
+
+# Nuxt
+.nuxt/
+.output/
+.nitro/
+.cache/
+
+# IDE
+.idea/
