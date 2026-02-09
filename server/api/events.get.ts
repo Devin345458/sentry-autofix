@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
   subscribe('*', callback)
 
   // Send initial connection message
-  eventStream.push(`data: ${JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() })}\n\n`)
+  eventStream.push(JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() }))
 
   // Clean up on close
   eventStream.onClosed(() => {

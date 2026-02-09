@@ -12,13 +12,13 @@ export default defineEventHandler(async (event) => {
   // Send existing logs first
   const existingLogs = getLogsForIssue(issueId)
   for (const log of existingLogs) {
-    eventStream.push(`data: ${JSON.stringify({
+    eventStream.push(JSON.stringify({
       type: 'log',
       issueId: log.sentry_issue_id,
       source: log.source,
       message: log.message,
       timestamp: log.timestamp,
-    })}\n\n`)
+    }))
   }
 
   // Register callback for new logs
@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
   subscribe(issueId, callback)
 
   // Send initial connection message
-  eventStream.push(`data: ${JSON.stringify({ type: 'connected', issueId, timestamp: new Date().toISOString() })}\n\n`)
+  eventStream.push(JSON.stringify({ type: 'connected', issueId, timestamp: new Date().toISOString() }))
 
   // Clean up on close
   eventStream.onClosed(() => {

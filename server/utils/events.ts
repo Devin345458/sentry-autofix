@@ -26,7 +26,7 @@ export function unsubscribe(issueId: string, callback: EventCallback): void {
 }
 
 export function broadcast(issueId: string, event: any): void {
-  const data = `data: ${JSON.stringify(event)}\n\n`
+  const data = JSON.stringify(event)
 
   // Send to issue-specific subscribers
   const issueClients = clients.get(issueId)
