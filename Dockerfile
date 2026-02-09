@@ -20,7 +20,7 @@ COPY package.json package-lock.json* ./
 RUN npm install
 
 # Install Claude Code CLI natively
-RUN curl -fsSL https://claude.ai/install.sh | sh
+RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.local/bin:${PATH}"
 
 # Copy source and build
