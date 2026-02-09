@@ -14,14 +14,17 @@ const MODEL = process.env.ANTHROPIC_MODEL || "qwen2.5-coder:14b";
  * Clone or update the repo, then use Claude Code CLI to analyze
  * the Sentry error and produce a fix.
  */
-export async function fixIssue({ parsed, projectConfig, reposDir }) {
+export async function fixIssue({ parsed, projectConfig, reposDir, onLog }) {
+  const log = onLog || (() => {});
   const repoDir = path.join(reposDir, projectConfig.repo.replace("/", "__"));
   const branch = `sentry-autofix/${parsed.issueId}`;
 
   // 1. Clone or pull the repo
+  log("git", `Cloning/updating repo ${projectConfig.repo}...`);
   await ensureRepo(projectConfig.repo, projectConfig.branch, repoDir);
 
   // 2. Create a fresh branch from the default branch
+  log("git", `Checking out ${projectConfig.branch} and pulling latest...`);
   await git(repoDir, ["checkout", projectConfig.branch]);
   await git(repoDir, ["pull", "origin", projectConfig.branch]);
   try {
@@ -29,14 +32,17 @@ export async function fixIssue({ parsed, projectConfig, reposDir }) {
   } catch {
     // branch doesn't exist yet, that's fine
   }
+  log("git", `Creating branch ${branch}...`);
   await git(repoDir, ["checkout", "-b", branch]);
 
   // 3. Build the prompt for Claude Code
   const prompt = buildPrompt(parsed, projectConfig);
 
   // 4. Run Claude Code CLI in the repo directory
+  log("claude", `Running Claude Code (${MODEL})...`);
   console.log(`[fixer] Running Claude Code (${MODEL}) for issue ${parsed.issueId}...`);
-  const claudeOutput = await runClaudeCode(repoDir, prompt);
+  const claudeOutput = await runClaudeCode(repoDir, prompt, log);
+  log("claude", "Claude Code finished.");
   console.log(`[fixer] Claude Code finished for issue ${parsed.issueId}`);
 
   // 5. Check what actually changed via git
@@ -44,11 +50,13 @@ export async function fixIssue({ parsed, projectConfig, reposDir }) {
   const changedFiles = diffFiles.trim().split("\n").filter(Boolean);
 
   if (changedFiles.length === 0) {
+    log("result", "No files changed.");
     console.log(`[fixer] No files changed for issue ${parsed.issueId}`);
     return { success: false, reason: "no_changes" };
   }
 
   // 6. Stage and commit
+  log("git", "Committing changes...");
   await git(repoDir, ["add", "-A"]);
   await git(repoDir, [
     "commit",
@@ -57,7 +65,10 @@ export async function fixIssue({ parsed, projectConfig, reposDir }) {
   ]);
 
   // 7. Push the branch
+  log("git", `Pushing branch ${branch}...`);
   await git(repoDir, ["push", "origin", branch, "--force-with-lease"]);
+
+  log("result", `Changed files: ${changedFiles.join(", ")}`);
 
   return {
     success: true,
@@ -115,7 +126,7 @@ function buildPrompt(parsed, projectConfig) {
  * Run Claude Code CLI in the given directory with the prompt.
  * Returns the CLI output text.
  */
-async function runClaudeCode(cwd, prompt) {
+async function runClaudeCode(cwd, prompt, log) {
   return new Promise((resolve, reject) => {
     const args = [
       "--print",        // non-interactive mode, output result and exit
@@ -126,34 +137,52 @@ async function runClaudeCode(cwd, prompt) {
 
     let stdout = "";
     let stderr = "";
+    let stdoutBuffer = "";
+    let stderrBuffer = "";
 
     const proc = spawn(CLAUDE_BIN, args, {
       cwd,
       timeout: 600_000, // 10 min timeout
       env: {
         ...process.env,
-        // Ensure Claude Code can find git, gh, etc.
         PATH: process.env.PATH,
       },
     });
 
     proc.stdout.on("data", (data) => {
-      stdout += data.toString();
+      const chunk = data.toString();
+      stdout += chunk;
+      stdoutBuffer += chunk;
+      const lines = stdoutBuffer.split("\n");
+      stdoutBuffer = lines.pop(); // keep incomplete last line in buffer
+      for (const line of lines) {
+        if (line.trim()) log("claude", line);
+      }
     });
 
     proc.stderr.on("data", (data) => {
-      stderr += data.toString();
+      const chunk = data.toString();
+      stderr += chunk;
+      stderrBuffer += chunk;
+      const lines = stderrBuffer.split("\n");
+      stderrBuffer = lines.pop();
+      for (const line of lines) {
+        if (line.trim()) log("claude-stderr", line);
+      }
     });
 
     proc.on("close", (code) => {
+      // Flush remaining buffers
+      if (stdoutBuffer.trim()) log("claude", stdoutBuffer);
+      if (stderrBuffer.trim()) log("claude-stderr", stderrBuffer);
       if (code !== 0) {
         console.warn(`[fixer] Claude Code stderr: ${stderr}`);
       }
-      // Resolve even on non-zero exit - we check git diff for actual changes
       resolve(stdout);
     });
 
     proc.on("error", (err) => {
+      log("error", `Failed to run Claude Code: ${err.message}`);
       reject(new Error(`Failed to run Claude Code: ${err.message}`));
     });
   });

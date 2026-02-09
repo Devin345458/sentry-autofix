@@ -27,6 +27,18 @@ export function initDb(dbPath) {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS issue_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sentry_issue_id TEXT NOT NULL,
+      timestamp TEXT DEFAULT (datetime('now')),
+      source TEXT NOT NULL,
+      message TEXT NOT NULL
+    )
+  `);
+
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_logs_issue ON issue_logs(sentry_issue_id)`);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       sentry_project_slug TEXT PRIMARY KEY,
       repo TEXT NOT NULL,
@@ -141,4 +153,21 @@ export function seedProjectsFromConfig(configProjects) {
     if (result.changes > 0) seeded++;
   }
   return seeded;
+}
+
+// --- Issue Logs ---
+
+export function insertLog(sentryIssueId, source, message) {
+  return db.prepare(`
+    INSERT INTO issue_logs (sentry_issue_id, source, message)
+    VALUES (?, ?, ?)
+  `).run(sentryIssueId, source, message);
+}
+
+export function getLogsForIssue(sentryIssueId, sinceId = 0) {
+  return db.prepare(`
+    SELECT * FROM issue_logs
+    WHERE sentry_issue_id = ? AND id > ?
+    ORDER BY id ASC
+  `).all(sentryIssueId, sinceId);
 }
