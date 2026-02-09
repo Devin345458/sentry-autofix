@@ -11,7 +11,7 @@
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "^1.0.0",
+    "@anthropic-ai/claude-code": "^2.1.0",
     "better-sqlite3": "^11.0.0",
     "nuxt": "^3.15.1",
     "vue": "^3.5.13",
