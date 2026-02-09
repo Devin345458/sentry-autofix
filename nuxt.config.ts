@@ -53,7 +53,7 @@ export default defineNuxtConfig({
     configPath: './config.json',
     reposDir: '/tmp/sentry-autofix-repos',
     claudeModel: 'sonnet-4-5',
-    claudeCodePath: '',
+    claudeCodePath: 'claude',
     maxConcurrentFixes: 1,
     maxAttemptsPerIssue: 2,
   },

@@ -19,6 +19,10 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 
+# Install Claude Code CLI natively
+RUN curl -fsSL https://claude.ai/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
 # Copy source and build
 COPY . .
 RUN npm run build
