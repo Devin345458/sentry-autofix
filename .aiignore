@@ -1,0 +1,21 @@
+# Dependencies
+vendor/
+node_modules/
+
+# Build artifacts
+public/build/
+dist/
+build/
+.next/
+.nuxt/
+
+# Logs & runtime
+storage/logs/
+storage/framework/
+tmp/
+
+# Testing / coverage
+coverage/
+
+# OS junk
+.DS_Store

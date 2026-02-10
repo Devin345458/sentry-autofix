@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
-import { existsSync } from 'fs'
+import { existsSync, mkdirSync, createWriteStream } from 'fs'
 import path from 'path'
 import type { ParsedEvent } from './parser'
 import type { ProjectConfig } from './db'
@@ -67,13 +67,13 @@ export async function fixIssue(params: FixIssueParams): Promise<FixResult> {
   await git(repoDir, ['checkout', '-b', branch])
 
   // 3. Build the prompt for Claude Code
-  const prompt = buildPrompt(parsed, projectConfig)
+  const prompt = buildPrompt(parsed, projectConfig, repoDir)
 
   // 4. Run Claude Code CLI in the repo directory
   const claudeBin = resolveClaudeBin(claudeCodePath)
   onLog('claude', `Running Claude Code (${claudeModel}) via ${claudeBin}...`)
   console.log(`[fixer] Running Claude Code (${claudeModel}) via ${claudeBin} for issue ${parsed.issueId}...`)
-  const claudeOutput = await runClaudeCode(repoDir, prompt, claudeBin, claudeModel, onLog)
+  const claudeOutput = await runClaudeCode(repoDir, prompt, claudeBin, claudeModel, onLog, parsed.issueId)
   onLog('claude', 'Claude Code finished.')
   console.log(`[fixer] Claude Code finished for issue ${parsed.issueId}`)
 
@@ -110,46 +110,53 @@ export async function fixIssue(params: FixIssueParams): Promise<FixResult> {
   }
 }
 
-function buildPrompt(parsed: ParsedEvent, projectConfig: ProjectConfig): string {
+// Strip backticks from Sentry data to prevent breaking prompt formatting
+function sanitize(str: string): string {
+  return str.replace(/`/g, "'")
+}
+
+function buildPrompt(parsed: ParsedEvent, projectConfig: ProjectConfig, repoDir: string): string {
   let prompt = `Fix a production bug in this ${projectConfig.language}/${projectConfig.framework} project.\n\n`
+  prompt += `## Working Directory\nThe repository is cloned at: ${repoDir}\nAll file paths in the stack trace are relative to this directory.\n\n`
 
   prompt += `## Error\n`
-  prompt += `**Title:** ${parsed.title}\n`
-  prompt += `**Level:** ${parsed.level}\n`
+  prompt += `Title: ${sanitize(parsed.title)}\n`
+  prompt += `Level: ${parsed.level}\n`
 
   if (parsed.culprit) {
-    prompt += `**Culprit:** ${parsed.culprit}\n`
+    prompt += `Culprit: ${sanitize(parsed.culprit)}\n`
   }
   if (parsed.message && parsed.message !== parsed.title) {
-    prompt += `**Message:** ${parsed.message}\n`
+    prompt += `Message: ${sanitize(parsed.message)}\n`
   }
 
   if (parsed.stacktrace) {
-    prompt += `\n## Stack Trace\n\`\`\`\n`
+    prompt += `\n## Stack Trace\n`
     for (const ex of parsed.stacktrace) {
-      prompt += `${ex.type}: ${ex.value}\n`
+      prompt += `${sanitize(ex.type)}: ${sanitize(ex.value)}\n`
       const appFrames = ex.frames.filter((f) => f.inApp)
       const frames = appFrames.length > 0 ? appFrames : ex.frames.slice(-10)
       for (const frame of frames) {
-        prompt += `  at ${frame.function || '?'} (${frame.filename}:${frame.lineNo})\n`
+        prompt += `  at ${sanitize(frame.function || '?')} (${sanitize(frame.filename)}:${frame.lineNo})\n`
         if (frame.context) {
-          prompt += `    > ${frame.context}\n`
+          prompt += `    > ${sanitize(frame.context)}\n`
         }
       }
     }
-    prompt += `\`\`\`\n`
   }
 
   if (parsed.request) {
-    prompt += `\n## HTTP Request\n${parsed.request.method} ${parsed.request.url}\n`
+    prompt += `\n## HTTP Request\n${parsed.request.method} ${sanitize(parsed.request.url)}\n`
   }
 
   prompt += `\n## Instructions\n`
-  prompt += `- Read the relevant source files from the stack trace above.\n`
-  prompt += `- Identify and fix the root cause of this error.\n`
-  prompt += `- Edit the files directly to apply your fix.\n`
+  prompt += `You are running inside the target repository at ${repoDir}. This is the project that has the bug.\n`
+  prompt += `- Use the Glob and Grep tools to find the files referenced in the stack trace.\n`
+  prompt += `- Read those files to understand the code around the error.\n`
+  prompt += `- Use the Edit tool to fix the root cause of this error directly in the source files.\n`
   prompt += `- Do not add new dependencies.\n`
-  prompt += `- If you cannot confidently fix the issue, make no changes.\n`
+  prompt += `- Do not just describe the fix — you MUST edit the files to apply it.\n`
+  prompt += `- If you cannot find the relevant files or confidently fix the issue, make no changes.\n`
 
   return prompt
 }
@@ -163,7 +170,8 @@ async function runClaudeCode(
   prompt: string,
   claudeCodePath: string,
   claudeModel: string,
-  onLog: (source: string, message: string) => void
+  onLog: (source: string, message: string) => void,
+  issueId: string
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = [
@@ -172,9 +180,22 @@ async function runClaudeCode(
       '--verbose',
       '--include-partial-messages',
       '--model', claudeModel,
+      '--max-turns', '15',
       '--allowedTools', 'Read,Glob,Grep,Edit,Write',
       prompt,
     ]
+
+    // Raw log file for debugging
+    const logsDir = path.join(cwd, '..', 'claude-logs')
+    if (!existsSync(logsDir)) mkdirSync(logsDir, { recursive: true })
+    const logFile = createWriteStream(path.join(logsDir, `${issueId}-${Date.now()}.log`))
+    logFile.write(`=== Claude Code Run ===\n`)
+    logFile.write(`Issue: ${issueId}\n`)
+    logFile.write(`Model: ${claudeModel}\n`)
+    logFile.write(`Time: ${new Date().toISOString()}\n`)
+    logFile.write(`CWD: ${cwd}\n`)
+    logFile.write(`Prompt:\n${prompt}\n`)
+    logFile.write(`${'='.repeat(60)}\n\n`)
 
     let resultText = ''
     let stderr = ''
@@ -196,6 +217,7 @@ async function runClaudeCode(
     onLog('claude', `Process started (PID ${proc.pid})`)
 
     proc.stdout.on('data', (data: Buffer) => {
+      logFile.write(data)
       stdoutBuffer += data.toString()
       const lines = stdoutBuffer.split('\n')
       stdoutBuffer = lines.pop() || ''
@@ -216,6 +238,7 @@ async function runClaudeCode(
     })
 
     proc.stderr.on('data', (data: Buffer) => {
+      logFile.write(`[stderr] ${data}`)
       const chunk = data.toString()
       stderr += chunk
       stderrBuffer += chunk
@@ -254,6 +277,8 @@ async function runClaudeCode(
         onLog('claude', 'Process exited cleanly but produced no result')
       }
 
+      logFile.write(`\n=== Process exited (code=${code}, signal=${signal}) ===\n`)
+      logFile.end()
       resolve(resultText)
     })
 
