@@ -182,6 +182,7 @@ async function runClaudeCode(
     let stderrBuffer = ''
 
     onLog('claude', `Spawning: ${claudeCodePath} --print --model ${claudeModel} ...`)
+    onLog('claude', `Prompt: ${prompt} ...`)
 
     const proc = spawn(claudeCodePath, args, {
       cwd,
